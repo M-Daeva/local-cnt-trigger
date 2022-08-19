@@ -5,10 +5,30 @@
     {
       "type": "object",
       "required": [
-        "query_with_wasm_query"
+        "query_with_smart_query"
       ],
       "properties": {
-        "query_with_wasm_query": {
+        "query_with_smart_query": {
+          "type": "object",
+          "required": [
+            "contract_addr"
+          ],
+          "properties": {
+            "contract_addr": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "query_with_raw_query"
+      ],
+      "properties": {
+        "query_with_raw_query": {
           "type": "object",
           "required": [
             "contract_addr"

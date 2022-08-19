@@ -1,4 +1,4 @@
-import { getData, SigningCosmWasmClient } from "./signer";
+import { getData, SigningCosmWasmClient, fromBinary } from "./signer";
 const { ADDR, CONTR, getAliceClient } = getData(true);
 
 const l = console.log.bind(console);
@@ -14,12 +14,17 @@ async function main() {
     let res = await aliceClient.queryContractSmart(CONTR.ADDR, {
       query_with_wasm_query: { contract_addr: CONTR.ADDR },
     });
+    let {
+      data: { smart },
+    } = res;
+    let msg = fromBinary(smart.msg);
     l("\n", res, "\n");
+    l({ msg }); // { msg: { get_count: {} } }
   };
 
   let res;
 
-  await query();
+  //  await query();
 
   res = await aliceClient.execute(
     ADDR.ALICE,
@@ -29,17 +34,17 @@ async function main() {
   );
   l({ attributes: res.logs[0].events[2].attributes }, "\n");
 
-  await query();
+  // await query();
 
-  res = await aliceClient.execute(
-    ADDR.ALICE,
-    CONTR.ADDR,
-    { set_with_sub_msg: { contract_addr: CONTR.ADDR, count: 222 } },
-    gas
-  );
-  l({ attributes: res.logs[0].events[2].attributes }, "\n");
+  // res = await aliceClient.execute(
+  //   ADDR.ALICE,
+  //   CONTR.ADDR,
+  //   { set_with_sub_msg: { contract_addr: CONTR.ADDR, count: 222 } },
+  //   gas
+  // );
+  // l({ attributes: res.logs[0].events[2].attributes }, "\n");
 
-  await query();
+  // await query();
 }
 
 main();

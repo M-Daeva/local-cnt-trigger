@@ -1,6 +1,6 @@
 import { GasPrice, SigningStargateClient } from "@cosmjs/stargate";
 import { DirectSecp256k1HdWallet } from "@cosmjs/proto-signing";
-import { SigningCosmWasmClient } from "@cosmjs/cosmwasm-stargate";
+import { SigningCosmWasmClient, fromBinary } from "@cosmjs/cosmwasm-stargate";
 import {
   ALICE_ADDR as ALICE_ADDR_LOCAL,
   ALICE_SEED as ALICE_SEED_LOCAL,
@@ -86,4 +86,4 @@ function getData(
   };
 }
 
-export { getData, SigningCosmWasmClient, SigningStargateClient };
+export { getData, SigningCosmWasmClient, SigningStargateClient, fromBinary };

@@ -38,7 +38,8 @@
           "type": "object",
           "required": [
             "contract_addr",
-            "count"
+            "count",
+            "id"
           ],
           "properties": {
             "contract_addr": {
@@ -47,6 +48,11 @@
             "count": {
               "type": "integer",
               "format": "uint8",
+              "minimum": 0.0
+            },
+            "id": {
+              "type": "integer",
+              "format": "uint64",
               "minimum": 0.0
             }
           }

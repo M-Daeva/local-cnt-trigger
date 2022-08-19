@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, Coin, Deps, DepsMut, Empty, Env, MessageInfo, Response, StdResult, SubMsg,
-    WasmMsg, WasmQuery,
+    to_binary, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response,
+    StdResult, SubMsg, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 
@@ -49,7 +49,8 @@ pub fn execute(
         ExecuteMsg::SetWithSubMsg {
             contract_addr,
             count,
-        } => set_with_sub_msg(deps, info, contract_addr, count),
+            id,
+        } => set_with_sub_msg(deps, info, contract_addr, count, id),
     }
 }
 
@@ -59,16 +60,14 @@ pub fn set_with_msg(
     contract_addr: String,
     count: u8,
 ) -> Result<Response, ContractError> {
-    let cnt_msg = CntExecuteMsg::Set { count };
-
-    let new_msg = WasmMsg::Execute {
+    let wasm_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
-        msg: to_binary(&cnt_msg)?,
+        msg: to_binary(&CntExecuteMsg::Set { count })?,
         funds: Vec::<Coin>::new(),
-    };
+    });
 
     Ok(Response::new()
-        .add_message(new_msg)
+        .add_message(wasm_msg)
         .add_attribute("method", "set_with_msg")
         .add_attribute("expected_count", count.to_string()))
 }
@@ -78,38 +77,46 @@ pub fn set_with_sub_msg(
     _info: MessageInfo,
     contract_addr: String,
     count: u8,
+    id: u64,
 ) -> Result<Response, ContractError> {
-    let cnt_msg = CntExecuteMsg::Set { count };
-
-    let new_msg = WasmMsg::Execute {
-        contract_addr,
-        msg: to_binary(&cnt_msg)?,
-        funds: Vec::<Coin>::new(),
-    };
-
-    const REPLY_ID: u64 = 1;
-    let sub_msg = SubMsg::<Empty>::reply_on_success(new_msg, REPLY_ID);
+    let wasm_sub_msg = SubMsg::reply_on_success(
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg: to_binary(&CntExecuteMsg::Set { count })?,
+            funds: Vec::<Coin>::new(),
+        }),
+        id,
+    );
 
     Ok(Response::new()
-        .add_submessage(sub_msg)
+        .add_submessage(wasm_sub_msg)
         .add_attribute("method", "set_with_sub_msg")
-        .add_attribute("expected_count", count.to_string()))
+        .add_attribute("expected_count", count.to_string())
+        .add_attribute("id", id.to_string()))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::QueryWithWasmQuery { contract_addr } => query_with_wasm_query(contract_addr),
+        QueryMsg::QueryWithSmartQuery { contract_addr } => query_with_smart_query(contract_addr),
+        QueryMsg::QueryWithRawQuery { contract_addr } => query_with_raw_query(contract_addr),
     }
 }
 
-pub fn query_with_wasm_query(contract_addr: String) -> StdResult<Binary> {
-    let cnt_query_msg = CntQueryMsg::GetCount {};
-
-    let wasm_query = WasmQuery::Smart {
+pub fn query_with_smart_query(contract_addr: String) -> StdResult<Binary> {
+    let wasm_query = QueryRequest::<WasmQuery>::Wasm(WasmQuery::Smart {
         contract_addr,
-        msg: to_binary(&cnt_query_msg)?,
-    };
+        msg: to_binary(&CntQueryMsg::GetCount {})?,
+    });
+
+    to_binary(&QueryMsgResponse { data: wasm_query })
+}
+
+pub fn query_with_raw_query(contract_addr: String) -> StdResult<Binary> {
+    let wasm_query = QueryRequest::<WasmQuery>::Wasm(WasmQuery::Raw {
+        contract_addr,
+        key: to_binary(&CntQueryMsg::GetCount {})?,
+    });
 
     to_binary(&QueryMsgResponse { data: wasm_query })
 }
@@ -123,7 +130,8 @@ mod tests {
         mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
     };
     use cosmwasm_std::{
-        attr, from_binary, to_binary, Empty, Env, MessageInfo, OwnedDeps, Response, WasmQuery,
+        attr, from_binary, to_binary, Empty, Env, MessageInfo, OwnedDeps, QueryRequest, Response,
+        WasmQuery,
     };
 
     pub const CONTRACT_ADDR: &str = "juno1gjqnuhv52pd2a7ets2vhw9w9qa9knyhyqd4qeg";
@@ -181,10 +189,12 @@ mod tests {
     #[test]
     fn test_set_with_sub_msg() {
         const COUNT: u8 = 222;
+        const SUB_MSG_ID: u64 = 1;
         let (mut deps, env, info, _) = get_instance(ALICE_ADDR);
         let msg = ExecuteMsg::SetWithSubMsg {
             contract_addr: CONTRACT_ADDR.to_string(),
             count: COUNT,
+            id: SUB_MSG_ID,
         };
         let res = execute(deps.as_mut(), env, info, msg);
 
@@ -192,15 +202,16 @@ mod tests {
             res.unwrap().attributes,
             vec![
                 attr("method", "set_with_sub_msg"),
-                attr("expected_count", COUNT.to_string())
+                attr("expected_count", COUNT.to_string()),
+                attr("id", SUB_MSG_ID.to_string())
             ]
         )
     }
 
     #[test]
-    fn test_query() {
+    fn test_query_smart() {
         let (deps, env, _, _) = get_instance(ALICE_ADDR);
-        let msg = QueryMsg::QueryWithWasmQuery {
+        let msg = QueryMsg::QueryWithSmartQuery {
             contract_addr: CONTRACT_ADDR.to_string(),
         };
         let bin = query(deps.as_ref(), env, msg).unwrap();
@@ -208,10 +219,28 @@ mod tests {
 
         assert_eq!(
             res.data,
-            WasmQuery::Smart {
+            QueryRequest::Wasm(WasmQuery::Smart {
                 contract_addr: CONTRACT_ADDR.to_string(),
                 msg: to_binary(&CntQueryMsg::GetCount {}).unwrap(),
-            }
+            })
+        );
+    }
+
+    #[test]
+    fn test_query_raw() {
+        let (deps, env, _, _) = get_instance(ALICE_ADDR);
+        let msg = QueryMsg::QueryWithRawQuery {
+            contract_addr: CONTRACT_ADDR.to_string(),
+        };
+        let bin = query(deps.as_ref(), env, msg).unwrap();
+        let res = from_binary::<QueryMsgResponse>(&bin).unwrap();
+
+        assert_eq!(
+            res.data,
+            QueryRequest::Wasm(WasmQuery::Raw {
+                contract_addr: CONTRACT_ADDR.to_string(),
+                key: to_binary(&CntQueryMsg::GetCount {}).unwrap(),
+            })
         );
     }
 }
