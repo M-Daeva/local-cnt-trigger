@@ -2,13 +2,14 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response,
-    StdResult, SubMsg, WasmMsg, WasmQuery,
+    StdResult, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
 use crate::msg::{
-    CntExecuteMsg, CntQueryMsg, ExecuteMsg, InstantiateMsg, QueryMsg, QueryMsgResponse,
+    ExecuteCntMsg, ExecuteTrgMsg, InstantiateMsg, QueryCntMsg, QueryCntResponse, QueryTrgMsg,
+    QueryTrgResponse,
 };
 use crate::state::{State, STATE};
 
@@ -39,18 +40,13 @@ pub fn execute(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    msg: ExecuteMsg,
+    msg: ExecuteTrgMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::SetWithMsg {
+        ExecuteTrgMsg::SetWithMsg {
             contract_addr,
             count,
         } => set_with_msg(deps, info, contract_addr, count),
-        ExecuteMsg::SetWithSubMsg {
-            contract_addr,
-            count,
-            id,
-        } => set_with_sub_msg(deps, info, contract_addr, count, id),
     }
 }
 
@@ -62,7 +58,7 @@ pub fn set_with_msg(
 ) -> Result<Response, ContractError> {
     let wasm_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
-        msg: to_binary(&CntExecuteMsg::Set { count })?,
+        msg: to_binary(&ExecuteCntMsg::Set { count })?,
         funds: Vec::<Coin>::new(),
     });
 
@@ -72,67 +68,33 @@ pub fn set_with_msg(
         .add_attribute("expected_count", count.to_string()))
 }
 
-pub fn set_with_sub_msg(
-    _deps: DepsMut,
-    _info: MessageInfo,
-    contract_addr: String,
-    count: u8,
-    id: u64,
-) -> Result<Response, ContractError> {
-    let wasm_sub_msg = SubMsg::reply_on_success(
-        CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr,
-            msg: to_binary(&CntExecuteMsg::Set { count })?,
-            funds: Vec::<Coin>::new(),
-        }),
-        id,
-    );
-
-    Ok(Response::new()
-        .add_submessage(wasm_sub_msg)
-        .add_attribute("method", "set_with_sub_msg")
-        .add_attribute("expected_count", count.to_string())
-        .add_attribute("id", id.to_string()))
-}
-
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryTrgMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::QueryWithSmartQuery { contract_addr } => query_with_smart_query(contract_addr),
-        QueryMsg::QueryWithRawQuery { contract_addr } => query_with_raw_query(contract_addr),
+        QueryTrgMsg::SmartQuery { contract_addr } => wasm_query(deps, contract_addr),
     }
 }
 
-pub fn query_with_smart_query(contract_addr: String) -> StdResult<Binary> {
-    let wasm_query = QueryRequest::<WasmQuery>::Wasm(WasmQuery::Smart {
+pub fn wasm_query(deps: Deps, contract_addr: String) -> StdResult<Binary> {
+    let res: QueryCntResponse = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
         contract_addr,
-        msg: to_binary(&CntQueryMsg::GetCount {})?,
-    });
+        msg: to_binary(&QueryCntMsg::GetCount {})?,
+    }))?;
 
-    to_binary(&QueryMsgResponse { data: wasm_query })
-}
-
-pub fn query_with_raw_query(contract_addr: String) -> StdResult<Binary> {
-    let wasm_query = QueryRequest::<WasmQuery>::Wasm(WasmQuery::Raw {
-        contract_addr,
-        key: to_binary(&CntQueryMsg::GetCount {})?,
-    });
-
-    to_binary(&QueryMsgResponse { data: wasm_query })
+    to_binary(&QueryTrgResponse {
+        expected_count: res.count,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use crate::contract::{execute, instantiate, query};
-    use crate::msg::{CntQueryMsg, ExecuteMsg, InstantiateMsg, QueryMsg, QueryMsgResponse};
+    use crate::msg::{ExecuteTrgMsg, InstantiateMsg, QueryTrgMsg, QueryTrgResponse};
     use crate::ContractError;
     use cosmwasm_std::testing::{
         mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
     };
-    use cosmwasm_std::{
-        attr, from_binary, to_binary, Empty, Env, MessageInfo, OwnedDeps, QueryRequest, Response,
-        WasmQuery,
-    };
+    use cosmwasm_std::{attr, from_binary, Empty, Env, MessageInfo, OwnedDeps, Response};
 
     pub const CONTRACT_ADDR: &str = "juno1gjqnuhv52pd2a7ets2vhw9w9qa9knyhyqd4qeg";
     pub const ALICE_ADDR: &str = "juno1chgwz55h9kepjq0fkj5supl2ta3nwu638camkg";
@@ -171,7 +133,7 @@ mod tests {
     fn test_set_with_msg() {
         const COUNT: u8 = 111;
         let (mut deps, env, info, _) = get_instance(ALICE_ADDR);
-        let msg = ExecuteMsg::SetWithMsg {
+        let msg = ExecuteTrgMsg::SetWithMsg {
             contract_addr: CONTRACT_ADDR.to_string(),
             count: COUNT,
         };
@@ -187,60 +149,14 @@ mod tests {
     }
 
     #[test]
-    fn test_set_with_sub_msg() {
-        const COUNT: u8 = 222;
-        const SUB_MSG_ID: u64 = 1;
-        let (mut deps, env, info, _) = get_instance(ALICE_ADDR);
-        let msg = ExecuteMsg::SetWithSubMsg {
-            contract_addr: CONTRACT_ADDR.to_string(),
-            count: COUNT,
-            id: SUB_MSG_ID,
-        };
-        let res = execute(deps.as_mut(), env, info, msg);
-
-        assert_eq!(
-            res.unwrap().attributes,
-            vec![
-                attr("method", "set_with_sub_msg"),
-                attr("expected_count", COUNT.to_string()),
-                attr("id", SUB_MSG_ID.to_string())
-            ]
-        )
-    }
-
-    #[test]
-    fn test_query_smart() {
+    fn test_query() {
         let (deps, env, _, _) = get_instance(ALICE_ADDR);
-        let msg = QueryMsg::QueryWithSmartQuery {
+        let msg = QueryTrgMsg::SmartQuery {
             contract_addr: CONTRACT_ADDR.to_string(),
         };
         let bin = query(deps.as_ref(), env, msg).unwrap();
-        let res = from_binary::<QueryMsgResponse>(&bin).unwrap();
+        let res: QueryTrgResponse = from_binary(&bin).unwrap();
 
-        assert_eq!(
-            res.data,
-            QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: CONTRACT_ADDR.to_string(),
-                msg: to_binary(&CntQueryMsg::GetCount {}).unwrap(),
-            })
-        );
-    }
-
-    #[test]
-    fn test_query_raw() {
-        let (deps, env, _, _) = get_instance(ALICE_ADDR);
-        let msg = QueryMsg::QueryWithRawQuery {
-            contract_addr: CONTRACT_ADDR.to_string(),
-        };
-        let bin = query(deps.as_ref(), env, msg).unwrap();
-        let res = from_binary::<QueryMsgResponse>(&bin).unwrap();
-
-        assert_eq!(
-            res.data,
-            QueryRequest::Wasm(WasmQuery::Raw {
-                contract_addr: CONTRACT_ADDR.to_string(),
-                key: to_binary(&CntQueryMsg::GetCount {}).unwrap(),
-            })
-        );
+        assert_eq!(res.expected_count, 42);
     }
 }
